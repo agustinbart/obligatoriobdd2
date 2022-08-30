@@ -1,0 +1,83 @@
+---- TABLAS ----
+create table Clientes(
+CliCod int identity(1,1) primary key,
+CliNom varchar(20) not null,
+CliCI varchar(11) unique not null check(CliCI LIKE '[1-9][.][0-9][0-9][0-9][.][0-9][0-9][0-9][-][0-9]'),
+CliTel varchar(9) not null,
+CliDir varchar(30) not null,
+CliMail varchar(30),
+FchRegistro date not null DEFAULT GETDATE());
+
+create table Vehiculos(
+VehiculoCod int identity(1,1) primary key,
+Matricula varchar(8) unique not null check(Matricula LIKE '[A-Z][A-Z][A-Z][ ][0-9][0-9][0-9][0-9]'),
+Marca varchar(20) not null,
+Modelo varchar(20) not null,
+Anio int not null check(Anio >= 1990),
+Color varchar(20) not null);
+
+create table Clientes_Vehiculos(
+CliCod int references Clientes(CliCod) not null,
+VehiculoCod int references Vehiculos(VehiculoCod) not null,
+Fecha date DEFAULT GETDATE(),
+primary key(CliCod, VehiculoCod));
+
+create table Mecanicos(
+MecCod int identity(1,1) primary key,
+MecNom varchar(20) not null,
+MecCI varchar(11) unique check(MecCI LIKE '[1-9][.][0-9][0-9][0-9][.][0-9][0-9][0-9][-][0-9]'),
+MecTel varchar(9),
+MecFchIng date,
+MecValorHora int check(MecValorHora > 0),
+MecActivo varchar(1) check(MecActivo in ('S', 'N')));
+
+create table Repuestos(
+RepuestoCod varchar(9) check(RepuestoCod LIKE '[A-Z][A-Z][A-Z][0-9][0-9][0-9][0-9][0-9][0-9]') primary key,
+RepuestoDsc varchar(30),
+RepuestoCosto numeric(8,2),
+RepuestoTipo varchar(12) check(RepuestoTipo in('Motor', 'Carroceria', 'Lubricación', 'Varios'))
+);
+
+create table Reparacion(
+RepCod int identity(1,1) not null,
+RepAnio int DEFAULT YEAR(GETDATE()) not null,
+VehiculoCod int references Vehiculos(VehiculoCod),
+FchEntrada date DEFAULT GETDATE() not null,
+FchSalida date,
+MecCod int references Mecanicos(MecCod) not null,
+RepDscEntrada varchar(120),
+RepDscSalida varchar(120),
+KmsEntrada numeric(8,2)
+primary key(RepCod, RepAnio));
+
+create table Reparacion_Repuestos(
+RepCod int not null,
+RepAnio int not null,
+RepuestoCod varchar(9) references Repuestos(RepuestoCod) not null,
+Cantidad int,
+CostoUnitario numeric(8,2),
+primary key(RepCod, RepAnio, RepuestoCod),
+foreign key(RepCod, RepAnio) references Reparacion(RepCod, RepAnio));
+
+create table Reparacion_horas(
+RepCod int not null,
+RepAnio int not null,
+MecCod int references Mecanicos(MecCod) not null,
+Horas int,
+CostoHora int,
+primary key(RepCod, RepAnio, MecCod),
+foreign key(RepCod, RepAnio) references Reparacion(RepCod, RepAnio));
+
+create table Historial_Clientes_Vehiculos(
+CliCod int not null,
+VehiculoCod int not null,
+FchCambio date DEFAULT GETDATE(),
+primary key(CliCod, VehiculoCod));
+
+---- INDICES ----
+create index i_Reparacion_VehiculoCod on Reparacion(VehiculoCod);
+create index i_Reparacion_MecCod on Reparacion(MecCod);
+create index i_ReparacionR_RepuestoCod on Reparacion_Repuestos(RepuestoCod);
+create index i_ReparacionH_MecCod on Reparacion_horas(MecCod);
+create index i_HistorialCV_VehiculoCod on Historial_Clientes_Vehiculos(VehiculoCod);
+create index i_ClientesV_VehiculoCod on Clientes_Vehiculos(VehiculoCod);

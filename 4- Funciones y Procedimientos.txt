@@ -1,0 +1,81 @@
+1)
+CREATE PROCEDURE [dbo].[CostoTotal_Reparacion]
+	@RepCod int,
+	@RepAnio int
+AS
+BEGIN
+
+	DECLARE @CostoTotalR numeric(8,2)
+	DECLARE @CostoTotalMO numeric(8,2)
+
+	SET @CostoTotalR = (SELECT SUM(RR.CostoUnitario * RR.Cantidad) FROM Reparacion_Repuestos rr WHERE rr.RepAnio = (@RepAnio) AND RepCod = (@RepCod) GROUP BY rr.RepCod, rr.RepAnio);
+    	SET @CostoTotalMO = (SELECT SUM(rh.CostoHora * rh.Horas) FROM Reparacion_horas rh WHERE rh.RepAnio = (@RepAnio) AND rh.RepCod = (@RepCod) GROUP BY rh.RepCod, rh.RepAnio);
+
+	SELECT @CostoTotalR + @CostoTotalMO
+
+END
+GO
+
+2)
+CREATE PROCEDURE [dbo].[CostoTotal_HorasTrabajadas]
+	@Anio int,
+	@Mes int,
+	@Horas int out,
+	@Costo numeric(8,2) out
+AS
+BEGIN
+
+	SET @Horas = (SELECT SUM(rh.Horas) FROM Reparacion_horas rh INNER JOIN Reparacion r ON r.RepCod = rh.RepCod AND r.RepAnio = rh.RepAnio 
+				  WHERE YEAR(r.FchEntrada) = @Anio AND MONTH(r.FchEntrada) = @Mes);
+
+    SET @Costo = (SELECT SUM(rh.CostoHora) FROM Reparacion_horas rh INNER JOIN Reparacion r ON r.RepCod = rh.RepCod AND r.RepAnio = rh.RepAnio 
+					WHERE YEAR(r.FchEntrada) = @Anio AND MONTH(r.FchEntrada) = @Mes) * @Horas;
+
+END
+GO
+
+3)
+CREATE PROCEDURE [dbo].[ClientesConVehiculosEnReparacion]
+AS
+BEGIN
+
+	SELECT DISTINCT c.CliCod, c.CliNom, v.Matricula from Clientes c INNER JOIN Clientes_Vehiculos cv ON c.CliCod = cv.CliCod 
+														   INNER JOIN Vehiculos v ON cv.VehiculoCod = v.VehiculoCod
+														   INNER JOIN Reparacion r ON v.VehiculoCod = r.VehiculoCod
+	WHERE r.FchSalida IS NULL AND r.RepDscSalida IS NULL
+	ORDER BY c.CliCod, v.Matricula
+
+END
+GO
+
+4)
+CREATE FUNCTION CantidadDueniosVehiculo(@Matricula varchar(8))
+RETURNS INT
+AS
+BEGIN
+
+DECLARE @ContadorActual INT;
+DECLARE @ContadorAntiguos INT;
+
+SET @ContadorActual = (SELECT COUNT((cv.VehiculoCod)) FROM Clientes_Vehiculos cv INNER JOIN Vehiculos v ON cv.VehiculoCod = v.VehiculoCod WHERE v.Matricula = @Matricula)
+SET @ContadorAntiguos = (SELECT COUNT((hcv.VehiculoCod)) FROM Historial_Clientes_Vehiculos hcv INNER JOIN Vehiculos v ON hcv.VehiculoCod = v.VehiculoCod WHERE v.Matricula = @Matricula)
+
+RETURN (@ContadorActual + @ContadorAntiguos);
+END
+GO
+
+5)
+CREATE PROCEDURE [dbo].[RepuestosMasUsados]
+	@CodigoRepuesto VARCHAR(9) out,
+	@Cantidad INT out
+AS
+BEGIN
+
+	SET @CodigoRepuesto = (SELECT TOP 1 rr.RepuestoCod AS Cantidad FROM Reparacion_Repuestos rr GROUP BY rr.RepuestoCod HAVING SUM(rr.Cantidad) >= ALL 
+						  (SELECT SUM(rr2.Cantidad) FROM Reparacion_Repuestos rr2 GROUP BY rr2.RepuestoCod))
+
+	SET @Cantidad = (SELECT TOP 1 SUM(rr.Cantidad) AS Cantidad FROM Reparacion_Repuestos rr GROUP BY rr.RepuestoCod HAVING SUM(rr.Cantidad) >= ALL 
+					(SELECT SUM(rr2.Cantidad) FROM Reparacion_Repuestos rr2 GROUP BY rr2.RepuestoCod))
+
+END
+GO

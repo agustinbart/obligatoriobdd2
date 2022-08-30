@@ -1,0 +1,197 @@
+a)
+
+CREATE TRIGGER Control_Aumento_VH
+ON Mecanicos
+AFTER UPDATE
+AS
+BEGIN
+	DECLARE @VH_NUEVO INT
+	DECLARE @VH_VIEJO INT
+	SELECT @VH_NUEVO = MecValorHora FROM INSERTED
+	SELECT @VH_VIEJO = MecValorHora FROM DELETED
+	IF @VH_NUEVO > (@VH_VIEJO * 1.20)
+		BEGIN
+		RAISERROR('No se puede aumentar el valor hora más de un 20 por ciento', 1, 1);
+		ROLLBACK
+		END;
+END;
+
+-----------------------------------
+b)
+
+CREATE TRIGGER Control_Mecanico_Inactivo_Reparacion
+ON Reparacion
+AFTER INSERT, UPDATE
+AS
+BEGIN
+	DECLARE @MecCod INT;
+	SELECT @MecCod = (SELECT MecCod from inserted);
+    IF (SELECT MecActivo FROM Mecanicos WHERE MecCod = @MecCod) = 'N' 
+		BEGIN
+		RAISERROR('No se puede asignar un mecánico inactivo a la reparación', 1, 1);
+		ROLLBACK
+		END;
+END;
+-------------------------------
+c)
+
+CREATE TABLE AUDIT_REPHS(
+RepCod int,
+RepAnio int,
+MecCod int,
+HorasV int,
+HorasN int,
+CostoHoraV int,
+CostoHoraN int,
+Usuario varchar(30) not null,
+TipoCambio varchar(6),
+primary key(RepCod, RepAnio, MecCod),
+);
+
+CREATE TRIGGER Audit_ReparacionHoras
+ON Reparacion_horas
+AFTER DELETE, UPDATE
+AS
+BEGIN
+	DECLARE @RepCod INT;
+	DECLARE @RepAnio INT;
+	DECLARE @MecCod INT;
+	DECLARE @HorasV INT;
+	DECLARE @HorasN INT;
+	DECLARE @CostoHoraV INT;
+	DECLARE @CostoHoraN INT;
+	DECLARE @Tipo VARCHAR(6);
+	
+	SET @RepCod = (SELECT RepCod FROM deleted);
+	SET @RepAnio = (SELECT RepAnio FROM deleted);
+	SET @MecCod = (SELECT MecCod FROM deleted);
+	SET @HorasV = (SELECT Horas FROM deleted);
+	SET @HorasN = (SELECT Horas FROM inserted);
+	SET @CostoHoraV = (SELECT CostoHora FROM deleted);
+	SET @CostoHoraN = (SELECT CostoHora FROM inserted);
+	IF EXISTS(SELECT * FROM DELETED) AND NOT EXISTS(SELECT * FROM INSERTED)
+		BEGIN
+			SET @Tipo = 'DELETE';
+		END;
+	ELSE
+		BEGIN
+			SET @Tipo = 'UPDATE';
+		END;
+
+	INSERT INTO AUDIT_REPHS(RepCod, RepAnio, MecCod, HorasV, HorasN, CostoHoraV, CostoHoraN, Usuario, TipoCambio) VALUES(@RepCod, @RepAnio, @MecCod, @HorasV, @HorasN, @CostoHoraV, @CostoHoraN, (SELECT SYSTEM_USER), @Tipo);
+END;
+-----------------------------------
+d)
+
+CREATE TRIGGER Historial_Cli_Veh
+ON Clientes_Vehiculos
+INSTEAD OF INSERT
+AS
+BEGIN
+	DECLARE @CliCod INT;
+	DECLARE @VehiculoCod INT;
+	DECLARE @FchCambio DATE;
+
+	DECLARE @CliCodV INT;
+	DECLARE @VehiculoCodV INT;
+	DECLARE @FchCambioV DATE;
+	
+	SET @CliCod = (SELECT CliCod FROM inserted);
+	SET @VehiculoCod = (SELECT VehiculoCod FROM inserted);
+	SET @FchCambio = (SELECT Fecha from inserted);
+
+	SET @CliCodV = (SELECT CliCod FROM Clientes_Vehiculos WHERE CliCod <> @CliCod AND VehiculoCod = @VehiculoCod)
+	SET @VehiculoCodV = (SELECT VehiculoCod FROM Clientes_Vehiculos WHERE CliCod <> @CliCod AND VehiculoCod = @VehiculoCod)
+	SET @FchCambioV = (SELECT Fecha FROM Clientes_Vehiculos WHERE CliCod <> @CliCod AND VehiculoCod = @VehiculoCod)
+
+	IF(@VehiculoCod IN (SELECT VehiculoCod FROM Clientes_Vehiculos))
+	BEGIN
+		DELETE FROM Clientes_Vehiculos WHERE VehiculoCod = @VehiculoCodV
+		INSERT INTO Historial_Clientes_Vehiculos(CliCod, VehiculoCod, FchCambio) VALUES(@CliCodV, @VehiculoCodV, @FchCambioV)
+	END
+
+	INSERT INTO Clientes_Vehiculos(CliCod, VehiculoCod, Fecha) VALUES(@CliCod, @VehiculoCod, @FchCambio)
+END;
+
+--EXTRAS--
+
+Resetear código de reparación cuando cambie el año
+
+CREATE TRIGGER Reset_RepCod
+ON Reparacion
+INSTEAD OF INSERT
+AS
+BEGIN
+	DECLARE @RepAnio INT;
+	DECLARE @VehiculoCod INT;
+	DECLARE @FchEntrada DATE;
+	DECLARE @FchSalida DATE;
+	DECLARE @MecCod INT;
+	DECLARE @RepDscEntrada VARCHAR(120);
+	DECLARE @RepDscSalida VARCHAR(120);
+	DECLARE @KmsEntrada NUMERIC(8,2);
+	
+	SET @RepAnio = (SELECT RepAnio FROM inserted)
+	SET @VehiculoCod = (SELECT VehiculoCod FROM inserted)
+	SET @FchEntrada = (SELECT FchEntrada from inserted)
+	SET @FchSalida = (SELECT FchSalida FROM inserted)
+	SET @MecCod = (SELECT MecCod FROM inserted)
+	SET @RepDscEntrada = (SELECT RepDscEntrada FROM inserted)
+	SET @RepDscSalida = (SELECT RepDscSalida FROM inserted)
+	SET @KmsEntrada = (SELECT KmsEntrada FROM inserted)
+
+	if(@RepAnio > ALL (SELECT RepAnio FROM Reparacion))
+	BEGIN
+		DBCC CHECKIDENT ([Reparacion], RESEED, 0)
+		PRINT 'Código reseteado';
+	END;
+	INSERT INTO Reparacion(RepAnio, VehiculoCod, FchEntrada, FchSalida, MecCod, RepDscEntrada, RepDscSalida, KmsEntrada) VALUES(@RepAnio, @VehiculoCod, @FchEntrada, @FchSalida, @MecCod, @RepDscEntrada, @RepDscSalida, @KmsEntrada);
+END;
+
+-------------
+Asignar costo hora automático al ingresar datos en Reparacion_horas
+
+CREATE TRIGGER CostoHora_Automatico
+ON Reparacion_horas
+INSTEAD OF INSERT
+AS
+BEGIN
+	DECLARE @RepCod INT;
+	DECLARE @RepAnio INT;
+	DECLARE @MecCod INT;
+	DECLARE @Horas INT;
+	DECLARE @CostoHora INT;
+	
+	SET @RepCod = (SELECT RepCod FROM inserted);
+	SET @RepAnio = (SELECT RepAnio FROM inserted);
+	SET @MecCod = (SELECT MecCod FROM inserted);
+	SET @Horas = (SELECT Horas FROM inserted);
+	SET @CostoHora = (SELECT MecValorHora FROM Mecanicos WHERE MecCod = @MecCod);
+
+		INSERT INTO Reparacion_horas(RepCod, RepAnio, MecCod, Horas, CostoHora) VALUES(@RepCod, @RepAnio, @MecCod, @Horas, @CostoHora)
+END;
+-----------
+
+Asignar costo de repuesto automático al ingresar datos en Reparacion_Repuestos
+
+CREATE TRIGGER CostoUnitario_Automatico
+ON Reparacion_Repuestos
+INSTEAD OF INSERT
+AS
+BEGIN
+	DECLARE @RepCod INT;
+	DECLARE @RepAnio INT;
+	DECLARE @RepuestoCod VARCHAR(9);
+	DECLARE @Cantidad INT;
+	DECLARE @CostoUnitario NUMERIC(8,2);
+	
+	SET @RepCod = (SELECT RepCod FROM inserted);
+	SET @RepAnio = (SELECT RepAnio FROM inserted);
+	SET @RepuestoCod = (SELECT RepuestoCod FROM inserted);
+	SET @Cantidad = (SELECT Cantidad FROM inserted);
+	SET @CostoUnitario = (SELECT RepuestoCosto FROM Repuestos WHERE RepuestoCod = @RepuestoCod);
+
+		INSERT INTO Reparacion_Repuestos(RepCod, RepAnio, RepuestoCod, Cantidad, CostoUnitario) VALUES(@RepCod, @RepAnio, @RepuestoCod, @Cantidad, @CostoUnitario)
+END;
+
+

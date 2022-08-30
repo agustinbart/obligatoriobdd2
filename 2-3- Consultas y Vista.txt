@@ -1,0 +1,39 @@
+a) SELECT r.RepuestoCod, r.RepuestoDsc, r.RepuestoCosto, r.RepuestoTipo
+FROM Repuestos r inner join Reparacion_Repuestos rr ON r.RepuestoCod = rr.RepuestoCod
+WHERE rr.RepAnio = 2022 and rr.CostoUnitario > 2000
+GROUP BY r.RepuestoCod, r.RepuestoDsc, r.RepuestoCosto, r.RepuestoTipo
+HAVING SUM(rr.Cantidad) >= ALL
+(SELECT SUM(rr2.Cantidad) FROM Reparacion_Repuestos rr2 WHERE rr2.RepAnio = 2022 and rr2.CostoUnitario > 2000 GROUP BY rr2.RepuestoCod)
+ORDER BY r.RepuestoCod
+
+
+b) SELECT v.VehiculoCod, v.Anio, v.Color, v.Marca, v.Matricula, v.Modelo FROM Vehiculos v
+INNER JOIN Reparacion r ON v.VehiculoCod = r.VehiculoCod
+WHERE r.RepAnio = 2022
+GROUP BY v.VehiculoCod, v.Anio, v.Color, v.Marca, v.Matricula, v.Modelo
+HAVING COUNT(r.VehiculoCod) > 5 AND 
+(SELECT SUM(rr.Cantidad) FROM Reparacion_Repuestos rr INNER JOIN Reparacion r2 ON rr.RepCod = r2.RepCod AND rr.RepAnio = r2.RepAnio) > 2
+
+c) SELECT r.VehiculoCod, COUNT(r.VehiculoCod) AS cantidad FROM reparacion r
+INNER JOIN Vehiculos v ON r.VehiculoCod = v.VehiculoCod
+WHERE YEAR(r.FchSalida) > 2010 AND r.FchSalida < GETDATE()
+GROUP BY r.VehiculoCod
+HAVING COUNT(r.VehiculoCod) > ANY (SELECT (COUNT(r2.VehiculoCod)) / (COUNT(v2.VehiculoCod)) FROM Reparacion r2
+								INNER JOIN Vehiculos v2 ON r2.VehiculoCod = v2.VehiculoCod
+								WHERE YEAR(r2.FchSalida) > 2010 AND r2.FchSalida <= GETDATE()
+								GROUP BY r2.VehiculoCod)
+
+d) SELECT R.RepuestoCod, R.RepuestoDsc, SUM(RR.Cantidad), (RR.CostoUnitario * SUM(RR.Cantidad))
+FROM Repuestos R inner join Reparacion_Repuestos RR ON R.RepuestoCod = RR.RepuestoCod
+GROUP BY R.RepuestoCod,R.RepuestoDsc,RR.CostoUnitario;
+
+e) SELECT re.RepuestoCod, re.RepuestoCosto FROM Repuestos re
+WHERE re.RepuestoTipo = 'Carroceria' AND re.RepuestoCosto > (SELECT MAX(re2.RepuestoCosto) FROM Repuestos re2 WHERE re2.RepuestoTipo = 'Motor')
+GROUP BY re.RepuestoCod, re.RepuestoCosto
+
+3) CREATE VIEW v_MecanicoCantVehiculosDif AS(
+SELECT m.MecCod, m.MecCI, m.MecNom, m.MecTel, COUNT(DISTINCT r.VehiculoCod) CantidadVD FROM Mecanicos m
+INNER JOIN Reparacion r ON m.MecCod = r.MecCod
+INNER JOIN Vehiculos v ON r.VehiculoCod = v.VehiculoCod
+WHERE r.RepAnio = 2021 AND v.Anio > 2015 AND r.RepAnio NOT IN(SELECT r2.RepAnio FROM Reparacion r2 WHERE r2.RepAnio < 2021)
+GROUP BY m.MecCod, m.MecCI, m.MecNom, m.MecTel)
